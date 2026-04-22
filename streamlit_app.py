@@ -3,6 +3,7 @@ from ultralytics import YOLO
 import numpy as np
 from PIL import Image
 from collections import Counter
+import cv2
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -11,28 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- CUSTOM CSS ----------------
-st.markdown("""
-<style>
-.main {
-    background-color: #0e1117;
-}
-h1 {
-    text-align: center;
-    color: #00ADB5;
-}
-.stButton>button {
-    border-radius: 10px;
-    background-color: #00ADB5;
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ---------------- LOAD MODEL ----------------
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # or "best.pt"
+    return YOLO("yolov8n.pt")  # make sure file exists in root
 
 model = load_model()
 
@@ -41,20 +24,15 @@ st.sidebar.title("⚙️ Controls")
 
 confidence = st.sidebar.slider(
     "Confidence Threshold",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.5
+    0.1, 1.0, 0.5
 )
 
 st.sidebar.markdown("---")
 st.sidebar.info("Upload an image to detect objects using YOLOv8.")
 
 # ---------------- HEADER ----------------
-st.markdown("<h1>🚗 YOLO Object Detection</h1>", unsafe_allow_html=True)
-st.markdown(
-    "<p style='text-align:center;'>AI-powered real-time detection of vehicles and objects</p>",
-    unsafe_allow_html=True
-)
+st.title("🚗 YOLO Object Detection")
+st.write("AI-powered real-time detection of vehicles and objects")
 
 st.markdown("---")
 
@@ -62,13 +40,13 @@ st.markdown("---")
 uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
+    image = Image.open(uploaded_file).convert("RGB")
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("📷 Original Image")
-        st.image(image, use_column_width=True)
+        st.image(image, use_container_width=True)
 
     img = np.array(image)
 
@@ -80,36 +58,34 @@ if uploaded_file:
 
     with col2:
         st.subheader("🎯 Detection Result")
-        st.image(result_img, use_column_width=True)
+        st.image(result_img, use_container_width=True)
 
     # ---------------- STATS ----------------
     st.markdown("### 📊 Detection Summary")
 
-    classes = results[0].boxes.cls.tolist()
-    names = model.names
+    if results[0].boxes is not None:
+        classes = results[0].boxes.cls.tolist()
+        names = model.names
 
-    detected = [names[int(c)] for c in classes]
+        detected = [names[int(c)] for c in classes]
 
-    if detected:
-        count = Counter(detected)
+        if detected:
+            count = Counter(detected)
+            cols = st.columns(3)
 
-        col1, col2, col3 = st.columns(3)
-
-        for i, (obj, num) in enumerate(count.items()):
-            if i % 3 == 0:
-                col1.metric(obj.upper(), num)
-            elif i % 3 == 1:
-                col2.metric(obj.upper(), num)
-            else:
-                col3.metric(obj.upper(), num)
+            for i, (obj, num) in enumerate(count.items()):
+                cols[i % 3].metric(obj.upper(), num)
+        else:
+            st.warning("No objects detected.")
     else:
         st.warning("No objects detected.")
 
-    # ---------------- DOWNLOAD ----------------
-    st.markdown("---")
+    # ---------------- DOWNLOAD FIX ----------------
+    _, buffer = cv2.imencode('.png', result_img)
+
     st.download_button(
         label="📥 Download Result Image",
-        data=result_img.tobytes(),
+        data=buffer.tobytes(),
         file_name="result.png",
         mime="image/png"
     )
