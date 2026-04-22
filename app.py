@@ -1,126 +1,118 @@
-import os
-
+import streamlit as st
 from ultralytics import YOLO
-import cv2
+import numpy as np
+from PIL import Image
+from collections import Counter
 
-# Load model
-model = YOLO("models/yolov8n.pt")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(
+    page_title="🚗 YOLO Detection App",
+    page_icon="🚗",
+    layout="wide"
+)
 
-# Vehicle class IDs (COCO dataset)
-vehicle_classes = [2, 3, 5, 7]  # car, bike, bus, truck
+# ---------------- CUSTOM CSS ----------------
+st.markdown("""
+<style>
+.main {
+    background-color: #0e1117;
+}
+h1 {
+    text-align: center;
+    color: #00ADB5;
+}
+.stButton>button {
+    border-radius: 10px;
+    background-color: #00ADB5;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
 
+# ---------------- LOAD MODEL ----------------
+@st.cache_resource
+def load_model():
+    return YOLO("yolov8n.pt")  # or "best.pt"
 
-# ================= IMAGE =================
-import os
-import cv2
+model = load_model()
 
-def detect_all_images():
-    input_folder = "input"
-    output_folder = "output"
+# ---------------- SIDEBAR ----------------
+st.sidebar.title("⚙️ Controls")
 
-    # Create output folder if not exists
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+confidence = st.sidebar.slider(
+    "Confidence Threshold",
+    min_value=0.1,
+    max_value=1.0,
+    value=0.5
+)
 
-    total_images = 0
+st.sidebar.markdown("---")
+st.sidebar.info("Upload an image to detect objects using YOLOv8.")
 
-    for file in os.listdir(input_folder):
-        if file.endswith((".jpg", ".png", ".jpeg")):
-            total_images += 1
-            img_path = os.path.join(input_folder, file)
+# ---------------- HEADER ----------------
+st.markdown("<h1>🚗 YOLO Object Detection</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align:center;'>AI-powered real-time detection of vehicles and objects</p>",
+    unsafe_allow_html=True
+)
 
-            print(f"\n📸 Processing: {file}")
+st.markdown("---")
 
-            results = model(img_path)
+# ---------------- FILE UPLOAD ----------------
+uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "png", "jpeg"])
 
-            r = results[0]
-            boxes = r.boxes
+if uploaded_file:
+    image = Image.open(uploaded_file)
 
-            vehicle_count = 0
+    col1, col2 = st.columns(2)
 
-            for box in boxes:
-                cls = int(box.cls[0])
+    with col1:
+        st.subheader("📷 Original Image")
+        st.image(image, use_column_width=True)
 
-                if cls in [2, 3, 5, 7]:  # vehicles
-                    vehicle_count += 1
+    img = np.array(image)
 
-            print(f"🚗 Vehicles detected: {vehicle_count}")
+    # Prediction
+    with st.spinner("🔍 Detecting objects..."):
+        results = model(img, conf=confidence)
 
-            # Save output image
-            output_path = os.path.join(output_folder, file)
-            annotated_img = r.plot()
-            cv2.imwrite(output_path, annotated_img)
+    result_img = results[0].plot()
 
-            print(f"💾 Saved to: {output_path}")
+    with col2:
+        st.subheader("🎯 Detection Result")
+        st.image(result_img, use_column_width=True)
 
-    if total_images == 0:
-        print("❌ No images found in input folder")
+    # ---------------- STATS ----------------
+    st.markdown("### 📊 Detection Summary")
+
+    classes = results[0].boxes.cls.tolist()
+    names = model.names
+
+    detected = [names[int(c)] for c in classes]
+
+    if detected:
+        count = Counter(detected)
+
+        col1, col2, col3 = st.columns(3)
+
+        for i, (obj, num) in enumerate(count.items()):
+            if i % 3 == 0:
+                col1.metric(obj.upper(), num)
+            elif i % 3 == 1:
+                col2.metric(obj.upper(), num)
+            else:
+                col3.metric(obj.upper(), num)
     else:
-        print(f"\n✅ Done! Processed {total_images} images")
+        st.warning("No objects detected.")
 
-    # Show result
-    results[0].show()
-
-    print("Detection completed!")
-
-
-# ================= VIDEO =================
-def detect_video():
-    cap = cv2.VideoCapture("input/video.mp4")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        results = model(frame)
-        frame = results[0].plot()
-
-        cv2.imshow("Video Detection", frame)
-
-        if cv2.waitKey(1) == 27:  # ESC key
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-# ================= WEBCAM =================
-def detect_webcam():
-    cap = cv2.VideoCapture(0)
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        results = model(frame)
-        frame = results[0].plot()
-
-        cv2.imshow("Webcam Detection", frame)
-
-        if cv2.waitKey(1) == 27:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-# ================= MENU =================
-print("1. Scan all images (Auto + Count + Save)")
-print("2. Video Detection")
-print("3. Webcam Detection")
-
-choice = input("Enter choice: ")
-
-if choice == "1":
-    detect_all_images()
-
-elif choice == "2":
-    detect_video()
-
-elif choice == "3":
-    detect_webcam()
+    # ---------------- DOWNLOAD ----------------
+    st.markdown("---")
+    st.download_button(
+        label="📥 Download Result Image",
+        data=result_img.tobytes(),
+        file_name="result.png",
+        mime="image/png"
+    )
 
 else:
-    print("Invalid choice")
+    st.info("👆 Upload an image to start detection")
