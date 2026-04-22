@@ -15,7 +15,7 @@ st.set_page_config(
 # ---------------- LOAD MODEL ----------------
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # make sure file exists in root
+    return YOLO("yolov8n.pt")  # make sure this file is in repo root
 
 model = load_model()
 
@@ -50,7 +50,7 @@ if uploaded_file:
 
     img = np.array(image)
 
-    # Prediction
+    # ---------------- PREDICTION ----------------
     with st.spinner("🔍 Detecting objects..."):
         results = model(img, conf=confidence)
 
@@ -80,8 +80,8 @@ if uploaded_file:
     else:
         st.warning("No objects detected.")
 
-    # ---------------- DOWNLOAD FIX ----------------
-    _, buffer = cv2.imencode('.png', result_img)
+    # ---------------- DOWNLOAD ----------------
+    _, buffer = cv2.imencode(".png", result_img)
 
     st.download_button(
         label="📥 Download Result Image",
