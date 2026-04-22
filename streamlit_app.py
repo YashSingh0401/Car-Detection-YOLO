@@ -15,7 +15,7 @@ st.set_page_config(
 # ---------------- LOAD MODEL ----------------
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # auto-downloads from internet
+    return YOLO("yolov8n")  # auto-downloads from internet
 
 model = load_model()
 
