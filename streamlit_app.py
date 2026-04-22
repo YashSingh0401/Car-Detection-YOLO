@@ -15,7 +15,7 @@ st.set_page_config(
 # ---------------- LOAD MODEL ----------------
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # make sure this file is in repo root
+    return YOLO("yolov8n.pt")  # auto-downloads from internet
 
 model = load_model()
 
