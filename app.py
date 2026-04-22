@@ -1,126 +1,146 @@
-import os
-
+import streamlit as st
 from ultralytics import YOLO
+import numpy as np
+from PIL import Image
 import cv2
+import tempfile
+import time
 
-# Load model
-model = YOLO("models/yolov8n.pt")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(
+    page_title="Car Detection AI",
+    page_icon="🚗",
+    layout="wide"
+)
 
-# Vehicle class IDs (COCO dataset)
-vehicle_classes = [2, 3, 5, 7]  # car, bike, bus, truck
+# ---------------- CUSTOM UI ----------------
+st.markdown("""
+<style>
+.title {
+    font-size: 42px;
+    font-weight: bold;
+    text-align: center;
+    color: #00BFFF;
+}
+.subtitle {
+    text-align: center;
+    color: #aaaaaa;
+    margin-bottom: 30px;
+}
+.card {
+    background-color: #1c1f26;
+    padding: 20px;
+    border-radius: 15px;
+    margin-top: 20px;
+}
+</style>
+""", unsafe_allow_html=True)
 
+st.markdown('<div class="title">🚗 Smart Car Detection System</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">YOLOv8 • Image | Video | Webcam</div>', unsafe_allow_html=True)
 
-# ================= IMAGE =================
-import os
-import cv2
+# ---------------- LOAD MODEL ----------------
+model = YOLO("yolov8n.pt")
 
-def detect_all_images():
-    input_folder = "input"
-    output_folder = "output"
+# ---------------- SIDEBAR ----------------
+st.sidebar.title("⚙️ Controls")
+mode = st.sidebar.radio("Select Mode", ["Image", "Video", "Webcam"])
+confidence = st.sidebar.slider("Confidence", 0.1, 1.0, 0.5)
 
-    # Create output folder if not exists
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+vehicle_classes = [2, 3, 5, 7]
 
-    total_images = 0
+# ---------------- IMAGE MODE ----------------
+if mode == "Image":
+    file = st.file_uploader("📤 Upload Image", type=["jpg", "png", "jpeg"])
 
-    for file in os.listdir(input_folder):
-        if file.endswith((".jpg", ".png", ".jpeg")):
-            total_images += 1
-            img_path = os.path.join(input_folder, file)
+    if file:
+        col1, col2 = st.columns(2)
 
-            print(f"\n📸 Processing: {file}")
+        image = Image.open(file)
+        img = np.array(image)
 
-            results = model(img_path)
+        with col1:
+            st.image(image, caption="Original Image", use_column_width=True)
 
-            r = results[0]
-            boxes = r.boxes
+        with st.spinner("🔍 Detecting vehicles..."):
+            results = model(img, conf=confidence)
+            output = results[0].plot()
 
-            vehicle_count = 0
+        # Count vehicles
+        count = 0
+        for box in results[0].boxes:
+            if int(box.cls[0]) in vehicle_classes:
+                count += 1
 
-            for box in boxes:
-                cls = int(box.cls[0])
+        with col2:
+            st.image(output, caption="Detected Output", use_column_width=True)
 
-                if cls in [2, 3, 5, 7]:  # vehicles
-                    vehicle_count += 1
+        st.markdown(f"""
+        <div class="card">
+        <h3>📊 Vehicles Detected: {count}</h3>
+        </div>
+        """, unsafe_allow_html=True)
 
-            print(f"🚗 Vehicles detected: {vehicle_count}")
+# ---------------- VIDEO MODE ----------------
+elif mode == "Video":
+    file = st.file_uploader("📤 Upload Video", type=["mp4", "avi", "mov"])
 
-            # Save output image
-            output_path = os.path.join(output_folder, file)
-            annotated_img = r.plot()
-            cv2.imwrite(output_path, annotated_img)
+    if file:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(file.read())
 
-            print(f"💾 Saved to: {output_path}")
+        cap = cv2.VideoCapture(tfile.name)
 
-    if total_images == 0:
-        print("❌ No images found in input folder")
-    else:
-        print(f"\n✅ Done! Processed {total_images} images")
+        stframe = st.empty()
+        progress = st.progress(0)
 
-    # Show result
-    results[0].show()
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_num = 0
 
-    print("Detection completed!")
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
+            results = model(frame, conf=confidence)
+            frame = results[0].plot()
 
-# ================= VIDEO =================
-def detect_video():
-    cap = cv2.VideoCapture("input/video.mp4")
+            # Count vehicles
+            count = sum(
+                1 for box in results[0].boxes
+                if int(box.cls[0]) in vehicle_classes
+            )
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+            stframe.image(frame, channels="BGR")
 
-        results = model(frame)
-        frame = results[0].plot()
+            frame_num += 1
+            progress.progress(min(frame_num / total_frames, 1.0))
 
-        cv2.imshow("Video Detection", frame)
+        cap.release()
+        st.success("✅ Video processing complete!")
 
-        if cv2.waitKey(1) == 27:  # ESC key
-            break
+# ---------------- WEBCAM MODE ----------------
+elif mode == "Webcam":
+    run = st.checkbox("Start Webcam")
 
-    cap.release()
-    cv2.destroyAllWindows()
+    FRAME_WINDOW = st.image([])
 
-
-# ================= WEBCAM =================
-def detect_webcam():
     cap = cv2.VideoCapture(0)
 
-    while True:
+    while run:
         ret, frame = cap.read()
         if not ret:
             break
 
-        results = model(frame)
+        results = model(frame, conf=confidence)
         frame = results[0].plot()
 
-        cv2.imshow("Webcam Detection", frame)
+        # Count vehicles
+        count = sum(
+            1 for box in results[0].boxes
+            if int(box.cls[0]) in vehicle_classes
+        )
 
-        if cv2.waitKey(1) == 27:
-            break
+        FRAME_WINDOW.image(frame, channels="BGR")
 
     cap.release()
-    cv2.destroyAllWindows()
-
-
-# ================= MENU =================
-print("1. Scan all images (Auto + Count + Save)")
-print("2. Video Detection")
-print("3. Webcam Detection")
-
-choice = input("Enter choice: ")
-
-if choice == "1":
-    detect_all_images()
-
-elif choice == "2":
-    detect_video()
-
-elif choice == "3":
-    detect_webcam()
-
-else:
-    print("Invalid choice")
