@@ -13,9 +13,17 @@ st.set_page_config(
 )
 
 # ---------------- LOAD MODEL ----------------
+import os
+
 @st.cache_resource
 def load_model():
-    return YOLO("yolov8n.pt")  # auto-downloads from internet
+    model_path = "yolov8n.pt"
+
+    # Delete corrupted file if exists
+    if os.path.exists(model_path):
+        os.remove(model_path)
+
+    return YOLO(model_path)  # forces fresh download
 
 model = load_model()
 
