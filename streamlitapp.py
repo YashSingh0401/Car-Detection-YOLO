@@ -5,6 +5,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 import torch
+import subprocess
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -74,6 +75,12 @@ with st.sidebar:
         default=["person", "car"]
     )
 
+    video_speed = st.selectbox(
+        "Video Processing Speed (CPU Optimization)",
+        ["Normal (Process all frames)", "Fast (Skip 1 frame)", "Very Fast (Skip 2 frames)"],
+        index=0
+    )
+
     uploaded_file = st.file_uploader(
         "Upload File",
         type=["jpg", "jpeg", "png", "mp4", "avi", "mov"]
@@ -128,32 +135,100 @@ if start and source == "Image" and uploaded_file is not None:
 # ---------------- VIDEO DETECTION ----------------
 elif start and source == "Video" and uploaded_file is not None:
 
+    # Determine frame skipping rate
+    skip_frames = 1
+    if video_speed == "Fast (Skip 1 frame)":
+        skip_frames = 2
+    elif video_speed == "Very Fast (Skip 2 frames)":
+        skip_frames = 3
+
+    # Save uploaded video to temp file and close to flush buffers
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(uploaded_file.read())
+    tfile.close()
 
     cap = cv2.VideoCapture(tfile.name)
+
+    # Get video properties
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    if fps <= 0:
+        fps = 25
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Output file setup
+    out_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out_tfile.close()
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(out_tfile.name, fourcc, fps // skip_frames, (width, height))
 
     frame_placeholder1 = col1.empty()
     frame_placeholder2 = col2.empty()
 
     st.info("Processing video... Please wait ⏳")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
+    frame_count = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        results = model(frame, conf=conf, iou=iou, classes=class_ids, device=device)
-        annotated_frame = results[0].plot()
+        if frame_count % skip_frames == 0:
+            results = model(frame, conf=conf, iou=iou, classes=class_ids, device=device)
+            annotated_frame = results[0].plot()
+            out.write(annotated_frame)
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
-        frame_placeholder1.image(frame_rgb, channels="RGB")
-        frame_placeholder2.image(annotated_rgb, channels="RGB")
+            frame_placeholder1.image(frame_rgb, channels="RGB", use_column_width=True)
+            frame_placeholder2.image(annotated_rgb, channels="RGB", use_column_width=True)
+
+        frame_count += 1
+        if total_frames > 0:
+            progress_bar.progress(min(frame_count / total_frames, 1.0))
+        status_text.text(f"Processing frame {frame_count}/{total_frames}...")
 
     cap.release()
-    st.success("✅ Video processed successfully!")
+    out.release()
+    progress_bar.empty()
+    status_text.empty()
+
+    # Convert the processed video to H.264 format using ffmpeg for HTML5 browser compatibility
+    h264_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    h264_tfile.close()
+
+    st.info("Encoding video for browser display... 🎬")
+    cmd = f'ffmpeg -y -i "{out_tfile.name}" -vcodec libx264 -pix_fmt yuv420p "{h264_tfile.name}"'
+    res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    if res.returncode == 0:
+        with open(h264_tfile.name, "rb") as f:
+            video_bytes = f.read()
+        st.success("✅ Video processed and encoded successfully!")
+        
+        st.markdown("### 🎬 Processed Video Player")
+        st.video(video_bytes)
+        
+        st.download_button(
+            label="📥 Download Annotated Video",
+            data=video_bytes,
+            file_name="detected_video.mp4",
+            mime="video/mp4"
+        )
+    else:
+        with open(out_tfile.name, "rb") as f:
+            video_bytes = f.read()
+        st.warning("⚠️ Could not encode video for inline playback, but you can still download the processed file below.")
+        st.download_button(
+            label="📥 Download Annotated Video (Raw MP4)",
+            data=video_bytes,
+            file_name="detected_video.mp4",
+            mime="video/mp4"
+        )
 
 # ---------------- WARNING ----------------
 elif start and uploaded_file is None:
