@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Streamlit App",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "${workspaceFolder}/streamlitapp.py"
+            ],
+            "python": "${workspaceFolder}/venv/Scripts/python.exe",
+            "jinja": true,
+            "justMyCode": true
+        }
+    ]
+}

@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+venv/
+.venv/
+env/
+ENV/
+
+# YOLO weights & runs
+*.pt
+*.onnx
+models/
+runs/
+
+# Project-specific output & temp directories
+output/
+.ipynb_checkpoints/
+
+# Ignore large media
+input/SampleVideo_LowQuality.mp4
+input/video.mp4
