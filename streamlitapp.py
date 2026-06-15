@@ -1,146 +1,160 @@
 import streamlit as st
 from ultralytics import YOLO
-import numpy as np
-from PIL import Image
 import cv2
 import tempfile
-import time
+import numpy as np
+from PIL import Image
+import torch
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="Car Detection AI",
-    page_icon="🚗",
-    layout="wide"
+    page_title="YOLO Detection App",
+    layout="wide",
+    page_icon="🚀"
 )
 
-# ---------------- CUSTOM UI ----------------
+# ---------------- CUSTOM CSS ----------------
 st.markdown("""
-<style>
-.title {
-    font-size: 42px;
-    font-weight: bold;
-    text-align: center;
-    color: #00BFFF;
-}
-.subtitle {
-    text-align: center;
-    color: #aaaaaa;
-    margin-bottom: 30px;
-}
-.card {
-    background-color: #1c1f26;
-    padding: 20px;
-    border-radius: 15px;
-    margin-top: 20px;
-}
-</style>
+    <style>
+        .main-title {
+            text-align: center;
+            font-size: 38px;
+            font-weight: 700;
+            color: #ff4b91;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 18px;
+            color: #4a4a4a;
+            margin-bottom: 30px;
+        }
+        .stButton>button {
+            width: 100%;
+            border-radius: 10px;
+            height: 3em;
+            font-size: 16px;
+            background-color: #ff4b91;
+            color: white;
+        }
+    </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="title">🚗 Smart Car Detection System</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">YOLOv8 • Image | Video | Webcam</div>', unsafe_allow_html=True)
+# ---------------- HEADER ----------------
+st.markdown('<div class="main-title">YOLO Object Detection App 🚀</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Detect objects in images and videos</div>', unsafe_allow_html=True)
 
-# ---------------- LOAD MODEL ----------------
-model = YOLO("yolov8n.pt")
+# ---------------- DEVICE SELECTION ----------------
+if torch.cuda.is_available():
+    device = "cuda"
+    device_name = "GPU (CUDA) ⚡"
+else:
+    device = "cpu"
+    device_name = "CPU 💻"
 
 # ---------------- SIDEBAR ----------------
-st.sidebar.title("⚙️ Controls")
-mode = st.sidebar.radio("Select Mode", ["Image", "Video", "Webcam"])
-confidence = st.sidebar.slider("Confidence", 0.1, 1.0, 0.5)
+with st.sidebar:
+    st.header("⚙️ Settings")
 
-vehicle_classes = [2, 3, 5, 7]
+    st.info(f"Running on: **{device_name}**")
 
-# ---------------- IMAGE MODE ----------------
-if mode == "Image":
-    file = st.file_uploader("📤 Upload Image", type=["jpg", "png", "jpeg"])
+    source = st.selectbox("Select Input Type", ["Image", "Video"])
 
-    if file:
-        col1, col2 = st.columns(2)
+    model_name = st.selectbox("Select Model", [
+        "yolov8n.pt",
+        "yolov8s.pt",
+        "yolov8m.pt"
+    ])
 
-        image = Image.open(file)
-        img = np.array(image)
+    conf = st.slider("Confidence Threshold", 0.0, 1.0, 0.25)
+    iou = st.slider("IoU Threshold", 0.0, 1.0, 0.45)
 
-        with col1:
-            st.image(image, caption="Original Image", use_column_width=True)
+    classes = st.multiselect(
+        "Select Classes",
+        ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
+        default=["person", "car"]
+    )
 
-        with st.spinner("🔍 Detecting vehicles..."):
-            results = model(img, conf=confidence)
-            output = results[0].plot()
+    uploaded_file = st.file_uploader(
+        "Upload File",
+        type=["jpg", "jpeg", "png", "mp4", "avi", "mov"]
+    )
 
-        # Count vehicles
-        count = 0
-        for box in results[0].boxes:
-            if int(box.cls[0]) in vehicle_classes:
-                count += 1
+    start = st.button("🚀 Start Detection")
 
-        with col2:
-            st.image(output, caption="Detected Output", use_column_width=True)
+# ---------------- LOAD MODEL ----------------
+@st.cache_resource
+def load_model(name):
+    return YOLO(name)
 
-        st.markdown(f"""
-        <div class="card">
-        <h3>📊 Vehicles Detected: {count}</h3>
-        </div>
-        """, unsafe_allow_html=True)
+model = load_model(model_name)
 
-# ---------------- VIDEO MODE ----------------
-elif mode == "Video":
-    file = st.file_uploader("📤 Upload Video", type=["mp4", "avi", "mov"])
+# ---------------- CLASS MAPPING ----------------
+class_map = {
+    "person": 0,
+    "bicycle": 1,
+    "car": 2,
+    "motorcycle": 3,
+    "bus": 5,
+    "truck": 7,
+    "traffic light": 9,
+    "stop sign": 11
+}
 
-    if file:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(file.read())
+class_ids = None
+if classes:
+    class_ids = [class_map[c] for c in classes if c in class_map]
 
-        cap = cv2.VideoCapture(tfile.name)
+# ---------------- LAYOUT ----------------
+col1, col2 = st.columns(2)
 
-        stframe = st.empty()
-        progress = st.progress(0)
+# ---------------- IMAGE DETECTION ----------------
+if start and source == "Image" and uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    image_np = np.array(image)
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_num = 0
+    results = model(image_np, conf=conf, iou=iou, classes=class_ids, device=device)
+    annotated = results[0].plot()
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+    with col1:
+        st.subheader("📷 Original Image")
+        st.image(image, use_column_width=True)
 
-            results = model(frame, conf=confidence)
-            frame = results[0].plot()
+    with col2:
+        st.subheader("🎯 Detection Result")
+        st.image(annotated, use_column_width=True)
 
-            # Count vehicles
-            count = sum(
-                1 for box in results[0].boxes
-                if int(box.cls[0]) in vehicle_classes
-            )
+    st.success("✅ Image processed successfully!")
 
-            stframe.image(frame, channels="BGR")
+# ---------------- VIDEO DETECTION ----------------
+elif start and source == "Video" and uploaded_file is not None:
 
-            frame_num += 1
-            progress.progress(min(frame_num / total_frames, 1.0))
+    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile.write(uploaded_file.read())
 
-        cap.release()
-        st.success("✅ Video processing complete!")
+    cap = cv2.VideoCapture(tfile.name)
 
-# ---------------- WEBCAM MODE ----------------
-elif mode == "Webcam":
-    run = st.checkbox("Start Webcam")
+    frame_placeholder1 = col1.empty()
+    frame_placeholder2 = col2.empty()
 
-    FRAME_WINDOW = st.image([])
+    st.info("Processing video... Please wait ⏳")
 
-    cap = cv2.VideoCapture(0)
-
-    while run:
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        results = model(frame, conf=confidence)
-        frame = results[0].plot()
+        results = model(frame, conf=conf, iou=iou, classes=class_ids, device=device)
+        annotated_frame = results[0].plot()
 
-        # Count vehicles
-        count = sum(
-            1 for box in results[0].boxes
-            if int(box.cls[0]) in vehicle_classes
-        )
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
-        FRAME_WINDOW.image(frame, channels="BGR")
+        frame_placeholder1.image(frame_rgb, channels="RGB")
+        frame_placeholder2.image(annotated_rgb, channels="RGB")
 
     cap.release()
+    st.success("✅ Video processed successfully!")
+
+# ---------------- WARNING ----------------
+elif start and uploaded_file is None:
+    st.warning("⚠️ Please upload a file first!")
