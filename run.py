@@ -17,30 +17,31 @@ Usage:
 import sys
 import subprocess
 from pathlib import Path
+from typing import NoReturn
 
-ROOT = Path(__file__).parent
+ROOT: Path = Path(__file__).parent
 
 
-def run_script(script_name, *args):
-    python = sys.executable
-    cmd = [python, str(ROOT / script_name)] + list(args)
+def run_script(script_name: str, *args: str) -> None:
+    python: str = sys.executable
+    cmd: list[str] = [python, str(ROOT / script_name)] + list(args)
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
         return
-    
-    command = sys.argv[1]
-    
+
+    command: str = sys.argv[1]
+
     if command == "prepare":
         run_script("prepare_data.py")
-    
+
     elif command == "train":
         run_script("train.py", "--epochs", "50", "--batch", "8", "--name", "car_v1")
-    
+
     elif command == "train-gpu":
         run_script("train.py",
             "--model", "yolo11m.pt",
@@ -52,7 +53,7 @@ def main():
             "--device", "0",
             "--name", "car_v1_gpu"
         )
-    
+
     elif command == "train-large":
         run_script("train.py",
             "--model", "yolo11x.pt",
@@ -64,22 +65,22 @@ def main():
             "--device", "0",
             "--name", "car_v1_large"
         )
-    
+
     elif command == "evaluate":
         run_script("evaluate.py")
-    
+
     elif command == "app":
-        streamlit = str(ROOT / "venv" / "Scripts" / "streamlit")
+        streamlit: str = str(ROOT / "venv" / "Scripts" / "streamlit")
         if not Path(streamlit).exists():
             streamlit = "streamlit"
         subprocess.run([streamlit, "run", str(ROOT / "streamlitapp.py")])
-    
+
     elif command == "all":
         run_script("prepare_data.py")
         run_script("train.py", "--epochs", "100", "--batch", "8", "--name", "car_v1")
         run_script("evaluate.py")
         print("\nTraining complete! Run 'python run.py app' to launch the detection app.")
-    
+
     else:
         print(f"Unknown command: {command}")
         print(__doc__)

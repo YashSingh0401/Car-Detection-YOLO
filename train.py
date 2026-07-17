@@ -3,206 +3,198 @@ import os
 import yaml
 import torch
 from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Optional
 from ultralytics import YOLO
 
-ROOT = Path(__file__).parent
-DATA_DIR = ROOT / "data"
-MODELS_DIR = ROOT / "models"
+ROOT: Path = Path(__file__).parent
+DATA_DIR: Path = ROOT / "data"
+MODELS_DIR: Path = ROOT / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 
-def get_dataset():
-    """Find or prepare dataset."""
-    # Try to find existing dataset
-    possible_yamls = [
+@dataclass
+class TrainingConfig:
+    model_name: str = "yolo11m.pt"
+    dataset_yaml: Optional[Path] = None
+    imgsz: int = 640
+    batch: int = 8
+    epochs: int = 100
+    lr0: float = 0.001
+    lrf: float = 0.01
+    momentum: float = 0.937
+    weight_decay: float = 0.0005
+    warmup_epochs: int = 3
+    warmup_momentum: float = 0.8
+    warmup_bias_lr: float = 0.1
+    box: float = 7.5
+    cls: float = 0.5
+    dfl: float = 1.5
+    hsv_h: float = 0.015
+    hsv_s: float = 0.7
+    hsv_v: float = 0.4
+    degrees: float = 0.0
+    translate: float = 0.1
+    scale: float = 0.5
+    shear: float = 0.0
+    perspective: float = 0.0
+    flipud: float = 0.0
+    fliplr: float = 0.5
+    mosaic: float = 1.0
+    mixup: float = 0.1
+    copy_paste: float = 0.1
+    erasing: float = 0.4
+    crop_fraction: float = 1.0
+    optimizer: str = "AdamW"
+    device: str = "cpu"
+    project: str = "car_detection"
+    name: str = "experiment"
+    exist_ok: bool = False
+    pretrained: bool = True
+    freeze: Optional[int] = None
+    dropout: float = 0.0
+    val: bool = True
+    plots: bool = True
+    save: bool = True
+    save_period: int = 10
+    workers: int = 0
+    patience: int = 20
+    seed: int = 42
+    deterministic: bool = True
+    single_cls: bool = False
+    rect: bool = False
+    cos_lr: bool = True
+    multi_scale: bool = False
+    nbs: int = 64
+
+
+def get_dataset() -> Path:
+    possible_yamls: list[Path] = [
         DATA_DIR / "car_dataset" / "dataset.yaml",
         *list(Path(".").rglob("dataset.yaml")),
     ]
     for yml in possible_yamls:
         if yml.exists():
             return yml
-    
-    # Prepare dataset if not found
+
     print("Dataset not found. Preparing COCO vehicle subset...")
     import prepare_data
     return prepare_data.prepare_coco_val_subset()
 
 
-def train_model(
-    model_name="yolo11m.pt",
-    dataset_yaml=None,
-    imgsz=640,
-    batch=8,
-    epochs=100,
-    lr0=0.001,
-    lrf=0.01,
-    momentum=0.937,
-    weight_decay=0.0005,
-    warmup_epochs=3,
-    warmup_momentum=0.8,
-    warmup_bias_lr=0.1,
-    box=7.5,
-    cls=0.5,
-    dfl=1.5,
-    hsv_h=0.015,
-    hsv_s=0.7,
-    hsv_v=0.4,
-    degrees=0.0,
-    translate=0.1,
-    scale=0.5,
-    shear=0.0,
-    perspective=0.0,
-    flipud=0.0,
-    fliplr=0.5,
-    mosaic=1.0,
-    mixup=0.1,
-    copy_paste=0.1,
-    erasing=0.4,
-    crop_fraction=1.0,
-    optimizer="AdamW",
-    device="cpu",
-    project="car_detection",
-    name="experiment",
-    exist_ok=False,
-    pretrained=True,
-    freeze=None,
-    dropout=0.0,
-    val=True,
-    plots=True,
-    save=True,
-    save_period=10,
-    workers=0,
-    patience=20,
-    seed=42,
-    deterministic=True,
-    single_cls=False,
-    rect=False,
-    cos_lr=True,
-    multi_scale=False,
-    nbs=64,
-):
-    """Train YOLO model with optimal hyperparameters for car detection."""
-    
-    dataset_yaml = dataset_yaml or get_dataset()
+def train_model(cfg: TrainingConfig) -> object:
+    dataset_yaml: Path = cfg.dataset_yaml or get_dataset()
     print(f"Using dataset: {dataset_yaml}")
-    
-    # Load dataset info
+
     with open(dataset_yaml) as f:
-        data_cfg = yaml.safe_load(f)
+        data_cfg: dict = yaml.safe_load(f)
     print(f"Classes: {data_cfg.get('names', 'N/A')}")
-    
-    # Load model
-    if pretrained and model_name.startswith("yolo"):
-        model = YOLO(model_name)
-        print(f"Loaded pre-trained model: {model_name}")
-    else:
-        model = YOLO(model_name)
-        print(f"Loaded model: {model_name}")
-    
-    # Auto-compute optimal batch size if possible
+
+    model: YOLO = YOLO(cfg.model_name)
+    print(f"Loaded model: {cfg.model_name}")
+
+    device: str = cfg.device
+    batch: int = cfg.batch
     if device == "cpu" or not torch.cuda.is_available():
         device = "cpu"
         if batch > 8:
             print("CPU detected, reducing batch size to 8")
             batch = min(batch, 8)
-    
+
     print(f"\n{'='*60}")
     print(f"Training Configuration:")
-    print(f"  Model: {model_name}")
+    print(f"  Model: {cfg.model_name}")
     print(f"  Device: {device}")
-    print(f"  Image Size: {imgsz}")
+    print(f"  Image Size: {cfg.imgsz}")
     print(f"  Batch Size: {batch}")
-    print(f"  Epochs: {epochs}")
-    print(f"  Optimizer: {optimizer}")
-    print(f"  Learning Rate: {lr0}")
+    print(f"  Epochs: {cfg.epochs}")
+    print(f"  Optimizer: {cfg.optimizer}")
+    print(f"  Learning Rate: {cfg.lr0}")
     print(f"  Dataset: {dataset_yaml}")
     print(f"{'='*60}\n")
-    
-    # Train
+
     results = model.train(
         data=str(dataset_yaml),
-        epochs=epochs,
-        patience=patience,
+        epochs=cfg.epochs,
+        patience=cfg.patience,
         batch=batch,
-        imgsz=imgsz,
-        save=save,
-        save_period=save_period,
-        val=val,
-        plots=plots,
+        imgsz=cfg.imgsz,
+        save=cfg.save,
+        save_period=cfg.save_period,
+        val=cfg.val,
+        plots=cfg.plots,
         device=device,
-        workers=workers,
-        project=project,
-        name=name,
-        exist_ok=exist_ok,
-        pretrained=pretrained,
-        optimizer=optimizer,
-        seed=seed,
-        deterministic=deterministic,
-        single_cls=single_cls,
-        rect=rect,
-        cos_lr=cos_lr,
-        multi_scale=multi_scale,
-        lr0=lr0,
-        lrf=lrf,
-        momentum=momentum,
-        weight_decay=weight_decay,
-        warmup_epochs=warmup_epochs,
-        warmup_momentum=warmup_momentum,
-        warmup_bias_lr=warmup_bias_lr,
-        box=box,
-        cls=cls,
-        dfl=dfl,
-        hsv_h=hsv_h,
-        hsv_s=hsv_s,
-        hsv_v=hsv_v,
-        degrees=degrees,
-        translate=translate,
-        scale=scale,
-        shear=shear,
-        perspective=perspective,
-        flipud=flipud,
-        fliplr=fliplr,
-        mosaic=mosaic,
-        mixup=mixup,
-        copy_paste=copy_paste,
-        erasing=erasing,
-        crop_fraction=crop_fraction,
-        dropout=dropout,
-        freeze=freeze,
-        nbs=nbs,
+        workers=cfg.workers,
+        project=cfg.project,
+        name=cfg.name,
+        exist_ok=cfg.exist_ok,
+        pretrained=cfg.pretrained,
+        optimizer=cfg.optimizer,
+        seed=cfg.seed,
+        deterministic=cfg.deterministic,
+        single_cls=cfg.single_cls,
+        rect=cfg.rect,
+        cos_lr=cfg.cos_lr,
+        multi_scale=cfg.multi_scale,
+        lr0=cfg.lr0,
+        lrf=cfg.lrf,
+        momentum=cfg.momentum,
+        weight_decay=cfg.weight_decay,
+        warmup_epochs=cfg.warmup_epochs,
+        warmup_momentum=cfg.warmup_momentum,
+        warmup_bias_lr=cfg.warmup_bias_lr,
+        box=cfg.box,
+        cls=cfg.cls,
+        dfl=cfg.dfl,
+        hsv_h=cfg.hsv_h,
+        hsv_s=cfg.hsv_s,
+        hsv_v=cfg.hsv_v,
+        degrees=cfg.degrees,
+        translate=cfg.translate,
+        scale=cfg.scale,
+        shear=cfg.shear,
+        perspective=cfg.perspective,
+        flipud=cfg.flipud,
+        fliplr=cfg.fliplr,
+        mosaic=cfg.mosaic,
+        mixup=cfg.mixup,
+        copy_paste=cfg.copy_paste,
+        erasing=cfg.erasing,
+        crop_fraction=cfg.crop_fraction,
+        dropout=cfg.dropout,
+        freeze=cfg.freeze,
+        nbs=cfg.nbs,
     )
-    
-    # Get best model path
-    best_model_path = Path(project) / name / "weights" / "best.pt"
+
+    best_model_path: Path = Path(cfg.project) / cfg.name / "weights" / "best.pt"
     if best_model_path.exists():
-        final_path = MODELS_DIR / "car_detection_best.pt"
         import shutil
+        final_path: Path = MODELS_DIR / "car_detection_best.pt"
         shutil.copy(best_model_path, final_path)
         print(f"\nBest model saved to: {final_path}")
-        print(f"You can now use this model in streamlitapp.py by selecting it or setting it as default.")
-    
+
     print("\nTraining complete!")
     return results
 
 
-def main():
+def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Train YOLO for car detection")
-    parser.add_argument("--model", type=str, default="yolo11m.pt", help="Base model")
-    parser.add_argument("--data", type=str, default=None, help="Dataset YAML path")
-    parser.add_argument("--imgsz", type=int, default=640, help="Image size")
-    parser.add_argument("--batch", type=int, default=8, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs")
-    parser.add_argument("--lr0", type=float, default=0.001, help="Initial learning rate")
-    parser.add_argument("--optimizer", type=str, default="AdamW", help="Optimizer")
-    parser.add_argument("--device", type=str, default="cpu", help="Device")
-    parser.add_argument("--freeze", type=int, default=None, help="Freeze backbone layers")
-    parser.add_argument("--name", type=str, default="car_experiment", help="Experiment name")
+    parser.add_argument("--model", type=str, default="yolo11m.pt")
+    parser.add_argument("--data", type=str, default=None)
+    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--batch", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--lr0", type=float, default=0.001)
+    parser.add_argument("--optimizer", type=str, default="AdamW")
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--freeze", type=int, default=None)
+    parser.add_argument("--name", type=str, default="car_experiment")
     args = parser.parse_args()
-    
-    train_model(
+
+    cfg = TrainingConfig(
         model_name=args.model,
-        dataset_yaml=args.data,
+        dataset_yaml=Path(args.data) if args.data else None,
         imgsz=args.imgsz,
         batch=args.batch,
         epochs=args.epochs,
@@ -212,6 +204,7 @@ def main():
         freeze=args.freeze,
         name=args.name,
     )
+    train_model(cfg)
 
 
 if __name__ == "__main__":
