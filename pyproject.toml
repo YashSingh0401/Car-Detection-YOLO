@@ -7,7 +7,7 @@ name = "car-detection-yolo"
 version = "1.0.0"
 description = "YOLO-based vehicle detection with Streamlit UI, training pipeline, and COCO dataset tools"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "streamlit>=1.50",
     "ultralytics>=8.0",
