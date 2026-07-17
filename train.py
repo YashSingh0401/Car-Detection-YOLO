@@ -68,6 +68,105 @@ class TrainingConfig:
     nbs: int = 64
 
 
+# ----- Accuracy-optimized presets -----
+
+def accuracy_preset(device: str = "cuda") -> TrainingConfig:
+    """Maximum accuracy: large model, full dataset, strong augmentation."""
+    return TrainingConfig(
+        model_name="yolo11x.pt",
+        imgsz=800,
+        batch=16,
+        epochs=300,
+        lr0=0.0005,
+        lrf=0.005,
+        optimizer="AdamW",
+        device=device,
+        name="car_accuracy",
+        hsv_h=0.02,
+        hsv_s=0.8,
+        hsv_v=0.5,
+        degrees=10.0,
+        translate=0.2,
+        scale=0.7,
+        shear=5.0,
+        flipud=0.1,
+        fliplr=0.5,
+        mosaic=1.0,
+        mixup=0.2,
+        copy_paste=0.2,
+        erasing=0.5,
+        weight_decay=0.0003,
+        warmup_epochs=5,
+        patience=50,
+        multi_scale=True,
+        deterministic=False,
+        workers=8,
+        nbs=128,
+    )
+
+
+def balanced_preset(device: str = "cpu") -> TrainingConfig:
+    """Good accuracy with moderate compute requirements."""
+    return TrainingConfig(
+        model_name="yolo11m.pt",
+        imgsz=640,
+        batch=8,
+        epochs=200,
+        lr0=0.001,
+        lrf=0.01,
+        optimizer="AdamW",
+        device=device,
+        name="car_balanced",
+        hsv_h=0.02,
+        hsv_s=0.7,
+        hsv_v=0.4,
+        degrees=5.0,
+        translate=0.15,
+        scale=0.5,
+        shear=2.0,
+        flipud=0.05,
+        fliplr=0.5,
+        mosaic=1.0,
+        mixup=0.15,
+        copy_paste=0.1,
+        erasing=0.4,
+        weight_decay=0.0005,
+        warmup_epochs=3,
+        patience=30,
+        workers=4,
+        nbs=64,
+    )
+
+
+def fast_preset(device: str = "cpu") -> TrainingConfig:
+    """Quick experiments: small model, fewer epochs."""
+    return TrainingConfig(
+        model_name="yolov8n.pt",
+        imgsz=640,
+        batch=8,
+        epochs=50,
+        lr0=0.001,
+        optimizer="AdamW",
+        device=device,
+        name="car_fast",
+        hsv_h=0.015,
+        hsv_s=0.5,
+        hsv_v=0.3,
+        translate=0.1,
+        scale=0.3,
+        mosaic=0.5,
+        workers=2,
+        patience=15,
+    )
+
+
+PRESETS: dict[str, callable] = {
+    "accuracy": accuracy_preset,
+    "balanced": balanced_preset,
+    "fast": fast_preset,
+}
+
+
 def get_dataset() -> Path:
     possible_yamls: list[Path] = [
         DATA_DIR / "car_dataset" / "dataset.yaml",
@@ -180,30 +279,63 @@ def train_model(cfg: TrainingConfig) -> object:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Train YOLO for car detection")
-    parser.add_argument("--model", type=str, default="yolo11m.pt")
-    parser.add_argument("--data", type=str, default=None)
-    parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--batch", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--lr0", type=float, default=0.001)
-    parser.add_argument("--optimizer", type=str, default="AdamW")
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--freeze", type=int, default=None)
-    parser.add_argument("--name", type=str, default="car_experiment")
+    parser.add_argument("--preset", type=str, choices=list(PRESETS.keys()), default=None,
+                        help="Training preset: accuracy, balanced, or fast")
+    parser.add_argument("--model", type=str, default=None, help="Base model override")
+    parser.add_argument("--data", type=str, default=None, help="Dataset YAML path")
+    parser.add_argument("--imgsz", type=int, default=None, help="Image size override")
+    parser.add_argument("--batch", type=int, default=None, help="Batch size override")
+    parser.add_argument("--epochs", type=int, default=None, help="Epochs override")
+    parser.add_argument("--lr0", type=float, default=None, help="Learning rate override")
+    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer override")
+    parser.add_argument("--device", type=str, default="cpu", help="Device")
+    parser.add_argument("--freeze", type=int, default=None, help="Freeze backbone layers")
+    parser.add_argument("--name", type=str, default=None, help="Experiment name override")
+    parser.add_argument("--full-data", action="store_true", help="Use full COCO train2017 dataset")
     args = parser.parse_args()
 
-    cfg = TrainingConfig(
-        model_name=args.model,
-        dataset_yaml=Path(args.data) if args.data else None,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        epochs=args.epochs,
-        lr0=args.lr0,
-        optimizer=args.optimizer,
-        device=args.device,
-        freeze=args.freeze,
-        name=args.name,
-    )
+    if args.full_data:
+        print("Preparing full COCO dataset (train2017 + val2017)...")
+        import prepare_data
+        yaml_path = prepare_data.prepare_coco_full()
+        args.data = str(Path(args.data) if args.data else yaml_path)
+
+    if args.preset:
+        preset_fn = PRESETS[args.preset]
+        cfg = preset_fn(device=args.device)
+        if args.model:
+            cfg.model_name = args.model
+        if args.data:
+            cfg.dataset_yaml = Path(args.data)
+        if args.imgsz is not None:
+            cfg.imgsz = args.imgsz
+        if args.batch is not None:
+            cfg.batch = args.batch
+        if args.epochs is not None:
+            cfg.epochs = args.epochs
+        if args.lr0 is not None:
+            cfg.lr0 = args.lr0
+        if args.optimizer:
+            cfg.optimizer = args.optimizer
+        if args.freeze is not None:
+            cfg.freeze = args.freeze
+        if args.name:
+            cfg.name = args.name
+        cfg.device = args.device
+    else:
+        cfg = TrainingConfig(
+            model_name=args.model or "yolo11m.pt",
+            dataset_yaml=Path(args.data) if args.data else None,
+            imgsz=args.imgsz or 640,
+            batch=args.batch or 8,
+            epochs=args.epochs or 100,
+            lr0=args.lr0 or 0.001,
+            optimizer=args.optimizer or "AdamW",
+            device=args.device,
+            freeze=args.freeze,
+            name=args.name or "car_experiment",
+        )
+
     train_model(cfg)
 
 

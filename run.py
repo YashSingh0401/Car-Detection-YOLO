@@ -1,18 +1,17 @@
 """
 Car Detection YOLO - Complete Pipeline
 =======================================
-1. Prepare COCO vehicle dataset
-2. Train model with optimized hyperparameters
-3. Evaluate model
-4. Run app
-
 Usage:
-  python run.py prepare     - Download and prepare dataset
-  python run.py train       - Train model (CPU-friendly defaults)
-  python run.py train-gpu   - Train with GPU-optimized settings
-  python run.py evaluate    - Evaluate trained model
-  python run.py app         - Launch Streamlit app
-  python run.py all         - Run full pipeline
+  python run.py prepare          - Quick dataset (COCO val2017, ~5k images)
+  python run.py prepare-full     - Full dataset (COCO train2017, ~118k images, ~18GB)
+  python run.py train            - Train with balanced defaults
+  python run.py train-balance    - Train with balanced preset (good accuracy)
+  python run.py train-accuracy   - Train with max accuracy preset (GPU recommended)
+  python run.py train-gpu        - Train with GPU-optimized settings
+  python run.py train-large      - Train YOLO11x with high epochs
+  python run.py evaluate         - Evaluate trained model
+  python run.py app              - Launch Streamlit app
+  python run.py all              - Full pipeline (quick dataset + balanced train)
 """
 import sys
 import subprocess
@@ -39,20 +38,19 @@ def main() -> None:
     if command == "prepare":
         run_script("prepare_data.py")
 
+    elif command == "prepare-full":
+        run_script("prepare_data.py", "full")
+
     elif command == "train":
-        run_script("train.py", "--epochs", "50", "--batch", "8", "--name", "car_v1")
+        run_script("train.py", "--preset", "balanced", "--name", "car_v1")
+
+    elif command == "train-accuracy":
+        run_script("train.py", "--preset", "accuracy",
+            "--full-data", "--name", "car_accuracy_v1")
 
     elif command == "train-gpu":
-        run_script("train.py",
-            "--model", "yolo11m.pt",
-            "--epochs", "200",
-            "--batch", "32",
-            "--imgsz", "640",
-            "--lr0", "0.001",
-            "--optimizer", "AdamW",
-            "--device", "0",
-            "--name", "car_v1_gpu"
-        )
+        run_script("train.py", "--preset", "balanced",
+            "--device", "0", "--batch", "32", "--epochs", "200", "--name", "car_v1_gpu")
 
     elif command == "train-large":
         run_script("train.py",
@@ -66,6 +64,9 @@ def main() -> None:
             "--name", "car_v1_large"
         )
 
+    elif command == "train-balance":
+        run_script("train.py", "--preset", "balanced", "--name", "car_balanced_v1")
+
     elif command == "evaluate":
         run_script("evaluate.py")
 
@@ -77,9 +78,9 @@ def main() -> None:
 
     elif command == "all":
         run_script("prepare_data.py")
-        run_script("train.py", "--epochs", "100", "--batch", "8", "--name", "car_v1")
+        run_script("train.py", "--preset", "balanced", "--name", "car_v1")
         run_script("evaluate.py")
-        print("\nTraining complete! Run 'python run.py app' to launch the detection app.")
+        print("\nPipeline complete! Run 'python run.py app' to launch the detection app.")
 
     else:
         print(f"Unknown command: {command}")
