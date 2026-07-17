@@ -26,3 +26,10 @@ input/video.mp4
 
 # Google search cached files
 input/cars and people near it*
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+
