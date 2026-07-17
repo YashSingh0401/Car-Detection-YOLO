@@ -1,10 +1,9 @@
 from pathlib import Path
 import sys
-import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from prepare_data import CLASS_NAMES, CLASS_MAP, VEHICLE_CLASSES, create_dataset_yaml, verify_dataset
+from prepare_data import CLASS_NAMES, CLASS_MAP, VEHICLE_CLASSES
 
 
 def test_class_mapping():
@@ -23,7 +22,6 @@ def test_vehicle_classes():
 
 
 def test_create_dataset_yaml(tmp_path):
-    import shutil
     import yaml
     from prepare_data import DATASET_DIR, DATA_DIR
 

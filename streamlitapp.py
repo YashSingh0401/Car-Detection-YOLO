@@ -1,7 +1,6 @@
 import os
 import io
-import csv
-import json
+import torch
 import logging
 import traceback
 import tempfile
@@ -27,7 +26,6 @@ st.markdown("""
 
 st.markdown('<div class="main-title">🚗 YOLO Car Detection</div>', unsafe_allow_html=True)
 
-import torch
 device: str = "cuda" if torch.cuda.is_available() else "cpu"
 fp16: bool = device == "cuda"
 if fp16:
@@ -45,10 +43,10 @@ CAR_CLASS_IDS: set[int] = {2, 5, 7}
 def apply_clahe(img: np.ndarray) -> np.ndarray:
     if len(img.shape) == 3 and img.shape[2] >= 3:
         lab: np.ndarray = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
-        l, a, b = cv2.split(lab)
+        l_channel, a, b = cv2.split(lab)
         clahe: cv2.CLAHE = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        lab = cv2.merge([l, a, b])
+        l_channel = clahe.apply(l_channel)
+        lab = cv2.merge([l_channel, a, b])
         img = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
     return img
 

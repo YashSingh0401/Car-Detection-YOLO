@@ -1,5 +1,4 @@
 """Export trained YOLO model to ONNX for faster CPU inference."""
-from pathlib import Path
 from ultralytics import YOLO
 
 

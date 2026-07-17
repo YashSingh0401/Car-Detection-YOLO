@@ -1,10 +1,9 @@
 """Train YOLO for maximum car detection accuracy."""
-import os
 import yaml
 import logging
 import torch
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 from ultralytics import YOLO
 

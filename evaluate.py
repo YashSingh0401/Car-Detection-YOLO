@@ -1,6 +1,5 @@
 """Evaluate car detection models and compare accuracy."""
 from pathlib import Path
-import numpy as np
 from ultralytics import YOLO
 import pandas as pd
 from typing import Optional
@@ -15,7 +14,6 @@ def benchmark_models() -> pd.DataFrame:
         "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
     ]
 
-    custom_models: list[Path] = list(MODELS_DIR.glob("*.pt"))
     results: list[dict] = []
 
     for model_name in models_to_test:
@@ -50,7 +48,6 @@ def benchmark_models() -> pd.DataFrame:
 
 def evaluate_custom_model(model_path: str, dataset_yaml: Optional[Path] = None) -> Optional[object]:
     import yaml
-    import os
 
     if dataset_yaml is None:
         dataset_yaml = ROOT / "data" / "car_dataset" / "dataset.yaml"

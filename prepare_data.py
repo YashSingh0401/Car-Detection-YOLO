@@ -1,5 +1,4 @@
 """Download COCO vehicle subset and prepare for YOLO training."""
-import os
 import logging
 import yaml
 import shutil
@@ -215,7 +214,7 @@ def prepare_coco_val_subset() -> Path:
             with open(label_file, 'w') as f:
                 f.write("\n".join(label_lines))
 
-    yaml_path: Path = create_dataset_yaml()
+    create_dataset_yaml()
     train_count: int = len([p for p in (DATASET_DIR / "images" / "train").glob("*") if p.suffix in ('.jpg', '.png')])
     val_count: int = len([p for p in (DATASET_DIR / "images" / "val").glob("*") if p.suffix in ('.jpg', '.png')])
 
@@ -253,7 +252,7 @@ def prepare_coco_full() -> Path:
     log.info("Processing validation set (COCO val2017)...")
     val_count: int = _filter_coco_annotations(val_ann, coco_dir, val_img_dir, use_as_val=True)
 
-    yaml_path: Path = create_dataset_yaml()
+    create_dataset_yaml()
 
     log.info("Full dataset ready! train=%d val=%d classes=%s",
              train_count, val_count, CLASS_NAMES)

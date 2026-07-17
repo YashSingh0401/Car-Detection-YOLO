@@ -45,7 +45,7 @@ def test_accuracy_preset():
     assert cfg.imgsz == 800
     assert cfg.epochs == 300
     assert cfg.patience == 50
-    assert cfg.multi_scale == True
+    assert cfg.multi_scale
     assert cfg.hsv_h == 0.02
     assert cfg.degrees == 10.0
     assert cfg.mixup == 0.2

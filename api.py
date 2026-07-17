@@ -6,7 +6,6 @@ import cv2
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse, Response
 from ultralytics import YOLO
-import io
 
 from contextlib import asynccontextmanager
 
