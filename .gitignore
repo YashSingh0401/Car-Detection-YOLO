@@ -23,3 +23,6 @@ output/
 # Ignore large media
 input/SampleVideo_LowQuality.mp4
 input/video.mp4
+
+# Google search cached files
+input/cars and people near it*

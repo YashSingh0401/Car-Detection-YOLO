@@ -1,235 +1,239 @@
+import os
+import traceback
 import streamlit as st
 from ultralytics import YOLO
 import cv2
 import tempfile
 import numpy as np
 from PIL import Image
-import torch
 import subprocess
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(
-    page_title="YOLO Detection App",
-    layout="wide",
-    page_icon="🚀"
-)
+st.set_page_config(page_title="YOLO Car Detection", layout="wide", page_icon="🚗")
 
-# ---------------- CUSTOM CSS ----------------
 st.markdown("""
     <style>
-        .main-title {
-            text-align: center;
-            font-size: 38px;
-            font-weight: 700;
-            color: #ff4b91;
-        }
-        .subtitle {
-            text-align: center;
-            font-size: 18px;
-            color: #4a4a4a;
-            margin-bottom: 30px;
-        }
-        .stButton>button {
-            width: 100%;
-            border-radius: 10px;
-            height: 3em;
-            font-size: 16px;
-            background-color: #ff4b91;
-            color: white;
-        }
-    </style>
+        .main-title { text-align: center; font-size: 38px; font-weight: 700; color: #ff4b91; }
+        .subtitle { text-align: center; font-size: 18px; color: #4a4a4a; }</style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
-st.markdown('<div class="main-title">YOLO Object Detection App 🚀</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Detect objects in images and videos</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🚗 YOLO Car Detection</div>', unsafe_allow_html=True)
 
-# ---------------- DEVICE SELECTION ----------------
-if torch.cuda.is_available():
-    device = "cuda"
-    device_name = "GPU (CUDA) ⚡"
-else:
-    device = "cpu"
-    device_name = "CPU 💻"
+device = "cuda" if cv2.cuda.getCudaEnabledDeviceCount() > 0 else "cpu"
 
-# ---------------- SIDEBAR ----------------
-with st.sidebar:
-    st.header("⚙️ Settings")
-
-    st.info(f"Running on: **{device_name}**")
-
-    source = st.selectbox("Select Input Type", ["Image", "Video"])
-
-    model_name = st.selectbox("Select Model", [
-        "yolov8n.pt",
-        "yolov8s.pt",
-        "yolov8m.pt"
-    ])
-
-    conf = st.slider("Confidence Threshold", 0.0, 1.0, 0.25)
-    iou = st.slider("IoU Threshold", 0.0, 1.0, 0.45)
-
-    classes = st.multiselect(
-        "Select Classes",
-        ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
-        default=["person", "car"]
-    )
-
-    video_speed = st.selectbox(
-        "Video Processing Speed (CPU Optimization)",
-        ["Normal (Process all frames)", "Fast (Skip 1 frame)", "Very Fast (Skip 2 frames)"],
-        index=0
-    )
-
-    uploaded_file = st.file_uploader(
-        "Upload File",
-        type=["jpg", "jpeg", "png", "mp4", "avi", "mov"]
-    )
-
-    start = st.button("🚀 Start Detection")
-
-# ---------------- LOAD MODEL ----------------
-@st.cache_resource
-def load_model(name):
-    return YOLO(name)
-
-model = load_model(model_name)
-
-# ---------------- CLASS MAPPING ----------------
-class_map = {
-    "person": 0,
-    "bicycle": 1,
-    "car": 2,
-    "motorcycle": 3,
-    "bus": 5,
-    "truck": 7,
-    "traffic light": 9,
-    "stop sign": 11
+CLASS_COLORS = {
+    0: (255, 100, 100), 1: (255, 200, 50), 2: (50, 200, 255),
+    3: (255, 150, 50), 5: (50, 255, 100), 7: (100, 100, 255),
+    9: (0, 255, 255), 11: (255, 0, 255),
 }
 
-class_ids = None
-if classes:
-    class_ids = [class_map[c] for c in classes if c in class_map]
+CAR_CLASS_IDS = {2, 5, 7}
 
-# ---------------- LAYOUT ----------------
-col1, col2 = st.columns(2)
+def apply_clahe(img):
+    if len(img.shape) == 3 and img.shape[2] >= 3:
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        lab = cv2.merge([l, a, b])
+        img = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return img
 
-# ---------------- IMAGE DETECTION ----------------
-if start and source == "Image" and uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    image_np = np.array(image)
+def run_detection(model, img, conf, iou, class_ids, device, imgsz, use_tta, use_preprocessing):
+    proc = img.copy()
+    if use_preprocessing:
+        proc = apply_clahe(proc)
 
-    results = model(image_np, conf=conf, iou=iou, classes=class_ids, device=device)
-    annotated = results[0].plot()
+    results = model(proc, conf=conf, iou=iou, classes=class_ids, device=device, imgsz=imgsz, augment=use_tta)
 
-    with col1:
-        st.subheader("📷 Original Image")
-        st.image(image, use_column_width=True)
+    boxes_data = []
+    for r in results:
+        if r.boxes is None or len(r.boxes) == 0:
+            continue
+        for box, score, cls_id in zip(
+            r.boxes.xyxy.cpu().numpy(),
+            r.boxes.conf.cpu().numpy(),
+            r.boxes.cls.cpu().numpy().astype(int)
+        ):
+            if int(cls_id) in CAR_CLASS_IDS:
+                score = min(score * 1.3, 1.0)
+            if score >= conf:
+                boxes_data.append((*box, score, cls_id))
 
-    with col2:
-        st.subheader("🎯 Detection Result")
-        st.image(annotated, use_column_width=True)
+    return boxes_data
 
-    st.success("✅ Image processed successfully!")
+def draw_detections(img, boxes_data, names):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for x1, y1, x2, y2, score, cls_id in boxes_data:
+        color = CLASS_COLORS.get(int(cls_id), (0, 255, 0))
+        label = f"{names[int(cls_id)]} {score:.2f}"
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        box_w, box_h = x2 - x1, y2 - y1
+        diag = (box_w ** 2 + box_h ** 2) ** 0.5
+        font_scale = max(0.6, min(1.6, diag / 180.0))
+        thickness = max(1, int(diag / 150.0))
+        box_thickness = max(2, int(diag / 120.0))
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, box_thickness)
+        (tw, th), bl = cv2.getTextSize(label, font, font_scale, thickness)
+        pad = 6
+        lx = x1
+        ly = y1 - 8
+        if ly - th < 0:
+            ly = y1 + th + 8
+        cv2.rectangle(img, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad), color, -1)
+        text_color = (0, 0, 0) if np.mean(color) > 127 else (255, 255, 255)
+        cv2.putText(img, label, (lx, ly), font, font_scale, text_color, thickness)
+    return img
 
-# ---------------- VIDEO DETECTION ----------------
-elif start and source == "Video" and uploaded_file is not None:
+with st.sidebar:
+    st.header("⚙️ Settings")
+    st.info(f"Device: **{'GPU ⚡' if device == 'cuda' else 'CPU 💻'}**")
 
-    # Determine frame skipping rate
-    skip_frames = 1
-    if video_speed == "Fast (Skip 1 frame)":
-        skip_frames = 2
-    elif video_speed == "Very Fast (Skip 2 frames)":
-        skip_frames = 3
+    source = st.selectbox("Input Type", ["Image", "Video"])
 
-    # Save uploaded video to temp file and close to flush buffers
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(uploaded_file.read())
-    tfile.close()
+    model_name = st.selectbox("Model", [
+        "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt",
+        "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
+    ], index=0)
 
-    cap = cv2.VideoCapture(tfile.name)
+    sensitivity = st.select_slider("Detection Sensitivity",
+        options=["Max Cars", "High", "Balanced", "Precise"],
+        value="High",
+        help="Max Cars: finds most cars (lower confidence). Precise: fewer but confident detections.")
 
-    # Get video properties
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    if fps <= 0:
-        fps = 25
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    imgsz = st.select_slider("Resolution", options=[320, 480, 640, 800, 960, 1280], value=640,
+        help="Higher = detects smaller/distant cars better, but slower.")
 
-    # Output file setup
-    out_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-    out_tfile.close()
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(out_tfile.name, fourcc, fps // skip_frames, (width, height))
+    classes = st.multiselect("Classes",
+        ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
+        default=["car", "bus", "truck", "motorcycle", "person"])
 
-    frame_placeholder1 = col1.empty()
-    frame_placeholder2 = col2.empty()
+    use_tta = st.checkbox("TTA (Test-Time Augmentation)", value=True,
+        help="Runs multiple augmentations to find more objects. Slower but more accurate.")
 
-    st.info("Processing video... Please wait ⏳")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    use_preprocessing = st.checkbox("CLAHE Preprocessing", value=True,
+        help="Enhances contrast to find cars in shadows/low-light.")
 
-    frame_count = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    uploaded_file = st.file_uploader("Upload File", type=["jpg", "jpeg", "png", "mp4", "avi", "mov"])
+    start = st.button("🚀 Start Detection")
 
-        if frame_count % skip_frames == 0:
-            results = model(frame, conf=conf, iou=iou, classes=class_ids, device=device)
-            annotated_frame = results[0].plot()
-            out.write(annotated_frame)
+SENS_MAP = {
+    "Max Cars": (0.08, 0.50),
+    "High": (0.15, 0.45),
+    "Balanced": (0.25, 0.45),
+    "Precise": (0.40, 0.50),
+}
+conf, iou = SENS_MAP[sensitivity]
 
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+model = None
+with st.spinner(f"Loading {model_name}..."):
+    try:
+        model = YOLO(model_name)
+        st.sidebar.success(f"{model_name} loaded | conf={conf}")
+    except Exception as e:
+        st.sidebar.error(f"Failed to load model: {e}")
+        st.stop()
 
-            frame_placeholder1.image(frame_rgb, channels="RGB", use_column_width=True)
-            frame_placeholder2.image(annotated_rgb, channels="RGB", use_column_width=True)
+class_map = {"person": 0, "bicycle": 1, "car": 2, "motorcycle": 3, "bus": 5, "truck": 7, "traffic light": 9, "stop sign": 11}
+class_ids = [class_map[c] for c in classes if c in class_map] if classes else None
 
-        frame_count += 1
-        if total_frames > 0:
-            progress_bar.progress(min(frame_count / total_frames, 1.0))
-        status_text.text(f"Processing frame {frame_count}/{total_frames}...")
+if start and uploaded_file is not None:
+    try:
+        if source == "Image":
+            image = Image.open(uploaded_file)
+            image_np = np.array(image)
 
-    cap.release()
-    out.release()
-    progress_bar.empty()
-    status_text.empty()
+            with st.spinner("Detecting..."):
+                boxes_data = run_detection(
+                    model, image_np, conf, iou, class_ids,
+                    device, imgsz, use_tta, use_preprocessing
+                )
 
-    # Convert the processed video to H.264 format using ffmpeg for HTML5 browser compatibility
-    h264_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-    h264_tfile.close()
+            annotated = image_np.copy()
+            draw_detections(annotated, boxes_data, model.names)
 
-    st.info("Encoding video for browser display... 🎬")
-    cmd = f'ffmpeg -y -i "{out_tfile.name}" -vcodec libx264 -pix_fmt yuv420p "{h264_tfile.name}"'
-    res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            tab1, tab2 = st.tabs(["🎯 Detection Result", "📷 Original"])
+            with tab1:
+                st.image(annotated, use_container_width=True)
+            with tab2:
+                st.image(image, use_container_width=True)
 
-    if res.returncode == 0:
-        with open(h264_tfile.name, "rb") as f:
-            video_bytes = f.read()
-        st.success("✅ Video processed and encoded successfully!")
-        
-        st.markdown("### 🎬 Processed Video Player")
-        st.video(video_bytes)
-        
-        st.download_button(
-            label="📥 Download Annotated Video",
-            data=video_bytes,
-            file_name="detected_video.mp4",
-            mime="video/mp4"
-        )
-    else:
-        with open(out_tfile.name, "rb") as f:
-            video_bytes = f.read()
-        st.warning("⚠️ Could not encode video for inline playback, but you can still download the processed file below.")
-        st.download_button(
-            label="📥 Download Annotated Video (Raw MP4)",
-            data=video_bytes,
-            file_name="detected_video.mp4",
-            mime="video/mp4"
-        )
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Cars Found", len(boxes_data))
+            if boxes_data:
+                scores = [s for _, _, _, _, s, _ in boxes_data]
+                col2.metric("Avg Confidence", f"{np.mean(scores):.0%}")
+                col3.metric("Settings", f"conf={conf}, imgsz={imgsz}")
 
-# ---------------- WARNING ----------------
+        elif source == "Video":
+            tfile = tempfile.NamedTemporaryFile(delete=False)
+            tfile.write(uploaded_file.read())
+            tfile.close()
+
+            cap = cv2.VideoCapture(tfile.name)
+            fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            out_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            out_tfile.close()
+            out = cv2.VideoWriter(out_tfile.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+
+            progress = st.progress(0)
+            status = st.empty()
+            total_obj = 0
+            fcount = 0
+
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame_dets = run_detection(
+                        model, frame_rgb, conf, iou, class_ids,
+                        device, imgsz, use_tta, use_preprocessing
+                    )
+                    annotated_frame = frame.copy()
+                    draw_detections(annotated_frame, frame_dets, model.names)
+                    out.write(annotated_frame)
+                    total_obj += len(frame_dets)
+                    fcount += 1
+                    progress.progress(min(fcount / total_frames, 1.0))
+                    status.text(f"Frame {fcount}/{total_frames}")
+            finally:
+                cap.release()
+                out.release()
+
+            col_v1, col_v2, col_v3 = st.columns(3)
+            col_v1.metric("Frames", fcount)
+            col_v2.metric("Total Objects", total_obj)
+            col_v3.metric("Per Frame", f"{total_obj / max(fcount, 1):.1f}")
+
+            h264_tfile = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            h264_tfile.close()
+            cmd = ["ffmpeg", "-y", "-i", out_tfile.name, "-vcodec", "libx264", "-pix_fmt", "yuv420p", h264_tfile.name]
+            try:
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                with st.expander("🎬 Processed Video", expanded=True):
+                    with open(h264_tfile.name, "rb") as f:
+                        st.video(f.read())
+            except subprocess.CalledProcessError:
+                st.warning("⚠️ ffmpeg not found. Install ffmpeg for browser-compatible video encoding.")
+                with st.expander("📥 Raw Video (Download)", expanded=True):
+                    with open(out_tfile.name, "rb") as f:
+                        st.video(f.read())
+            finally:
+                try:
+                    os.unlink(h264_tfile.name)
+                except (NameError, OSError):
+                    pass
+
+            st.success(f"Done! {total_obj} objects detected")
+
+    except Exception as e:
+        st.error(f"Error: {e}")
+        st.code(traceback.format_exc())
+
 elif start and uploaded_file is None:
-    st.warning("⚠️ Please upload a file first!")
+    st.warning("Please upload a file first")
