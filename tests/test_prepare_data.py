@@ -10,16 +10,16 @@ from prepare_data import CLASS_NAMES, CLASS_MAP, VEHICLE_CLASSES, create_dataset
 def test_class_mapping():
     assert len(CLASS_NAMES) == 4
     assert CLASS_NAMES == ["car", "motorcycle", "bus", "truck"]
-    assert CLASS_MAP[2] == 0
-    assert CLASS_MAP[3] == 1
-    assert CLASS_MAP[5] == 2
-    assert CLASS_MAP[7] == 3
+    assert CLASS_MAP[3] == 0
+    assert CLASS_MAP[4] == 1
+    assert CLASS_MAP[6] == 2
+    assert CLASS_MAP[8] == 3
 
 
 def test_vehicle_classes():
-    assert 2 in VEHICLE_CLASSES
-    assert VEHICLE_CLASSES[2] == "car"
-    assert VEHICLE_CLASSES[7] == "truck"
+    assert 3 in VEHICLE_CLASSES
+    assert VEHICLE_CLASSES[3] == "car"
+    assert VEHICLE_CLASSES[8] == "truck"
 
 
 def test_create_dataset_yaml(tmp_path):
