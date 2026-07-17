@@ -1,5 +1,6 @@
 ﻿"""Download COCO vehicle subset and prepare for YOLO training."""
 import os
+import logging
 import yaml
 import shutil
 import urllib.request
@@ -7,6 +8,9 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 from tqdm import tqdm
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log: logging.Logger = logging.getLogger("car_prep")
 
 DATA_DIR: Path = Path("data")
 DATASET_DIR: Path = DATA_DIR / "car_dataset"
@@ -45,20 +49,20 @@ class DownloadProgress:
 def download_file(url: str, dest_path: Path) -> None:
     dest_path = Path(dest_path)
     if dest_path.exists():
-        print(f"{dest_path.name} already exists, skipping download")
+        log.info("%s already exists, skipping download", dest_path.name)
         return
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     desc: str = f"Downloading {dest_path.name}"
     urllib.request.urlretrieve(url, dest_path, reporthook=DownloadProgress(desc))
-    print(f"Downloaded {dest_path.name}")
+    log.info("Downloaded %s", dest_path.name)
 
 
 def extract_zip(zip_path: Path, extract_dir: Path) -> None:
     dest_dir: Path = extract_dir / Path(zip_path.stem).stem
     if dest_dir.exists():
-        print(f"{dest_dir.name} already exists, skipping extraction")
+        log.info("%s already exists, skipping extraction", dest_dir.name)
         return
-    print(f"Extracting {zip_path.name}...")
+    log.info("Extracting %s...", zip_path.name)
     with zipfile.ZipFile(zip_path, 'r') as z:
         z.extractall(extract_dir)
 
@@ -69,14 +73,14 @@ def verify_dataset() -> None:
         lbl_dir: Path = DATASET_DIR / "labels" / split
         images: list[Path] = list(img_dir.glob("*.jpg")) + list(img_dir.glob("*.png"))
         labels: list[Path] = list(lbl_dir.glob("*.txt"))
-        print(f"\n{split.upper()}: {len(images)} images, {len(labels)} labels")
+        log.info("%s: %d images, %d labels", split.upper(), len(images), len(labels))
         class_counts: dict[str, int] = {c: 0 for c in CLASS_NAMES}
         for lbl in labels[:200]:
             with open(lbl) as f:
                 for line in f:
                     cls_id: int = int(line.split()[0])
                     class_counts[CLASS_NAMES[cls_id]] += 1
-        print("Class distribution (sample):", class_counts)
+        log.info("Class distribution (sample): %s", class_counts)
 
 
 def create_dataset_yaml(train_split: str = "images/train", val_split: str = "images/val") -> Path:
@@ -164,7 +168,7 @@ def prepare_coco_val_subset() -> Path:
     coco: COCO = COCO(str(ann_file))
     cat_ids: list[int] = coco.getCatIds(catNms=list(VEHICLE_CLASSES.values()))
     all_img_ids: list[int] = coco.getImgIds(catIds=cat_ids)
-    print(f"Found {len(all_img_ids)} images containing vehicles")
+    log.info("Found %d images containing vehicles", len(all_img_ids))
 
     for split in ["train", "val"]:
         (DATASET_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
@@ -209,11 +213,8 @@ def prepare_coco_val_subset() -> Path:
     train_count: int = len([p for p in (DATASET_DIR / "images" / "train").glob("*") if p.suffix in ('.jpg', '.png')])
     val_count: int = len([p for p in (DATASET_DIR / "images" / "val").glob("*") if p.suffix in ('.jpg', '.png')])
 
-    print(f"\nDataset ready (quick mode)!")
-    print(f"  Train: {train_count} images")
-    print(f"  Val:   {val_count} images")
-    print(f"  Classes: {CLASS_NAMES}")
-    print(f"  Config: {DATASET_DIR / 'dataset.yaml'}")
+    log.info("Dataset ready (quick mode)! train=%d val=%d classes=%s",
+             train_count, val_count, CLASS_NAMES)
     verify_dataset()
     return DATASET_DIR / "dataset.yaml"
 
@@ -240,19 +241,16 @@ def prepare_coco_full() -> Path:
     if not train_ann.exists() or not val_ann.exists():
         extract_zip(coco_dir / "annotations_trainval2017.zip", coco_dir)
 
-    print("\nProcessing training set (COCO train2017)...")
+    log.info("Processing training set (COCO train2017)...")
     train_count: int = _filter_coco_annotations(train_ann, coco_dir, train_img_dir, use_as_val=False)
 
-    print("\nProcessing validation set (COCO val2017)...")
+    log.info("Processing validation set (COCO val2017)...")
     val_count: int = _filter_coco_annotations(val_ann, coco_dir, val_img_dir, use_as_val=True)
 
     yaml_path: Path = create_dataset_yaml()
 
-    print(f"\nFull dataset ready!")
-    print(f"  Train: {train_count} images")
-    print(f"  Val:   {val_count} images")
-    print(f"  Classes: {CLASS_NAMES}")
-    print(f"  Config: {DATASET_DIR / 'dataset.yaml'}")
+    log.info("Full dataset ready! train=%d val=%d classes=%s",
+             train_count, val_count, CLASS_NAMES)
     verify_dataset()
     return DATASET_DIR / "dataset.yaml"
 

@@ -7,3 +7,10 @@ pycocotools==2.0.11
 albumentations==2.0.8
 pandas==3.0.2
 tqdm
+
+# API
+fastapi
+uvicorn
+
+# ONNX export / inference
+onnxruntime

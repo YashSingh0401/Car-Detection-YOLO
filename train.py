@@ -1,11 +1,15 @@
 """Train YOLO for maximum car detection accuracy."""
 import os
 import yaml
+import logging
 import torch
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 from ultralytics import YOLO
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log: logging.Logger = logging.getLogger("car_train")
 
 ROOT: Path = Path(__file__).parent
 DATA_DIR: Path = ROOT / "data"
@@ -176,41 +180,32 @@ def get_dataset() -> Path:
         if yml.exists():
             return yml
 
-    print("Dataset not found. Preparing COCO vehicle subset...")
+    log.info("Dataset not found. Preparing COCO vehicle subset...")
     import prepare_data
     return prepare_data.prepare_coco_val_subset()
 
 
 def train_model(cfg: TrainingConfig) -> object:
     dataset_yaml: Path = cfg.dataset_yaml or get_dataset()
-    print(f"Using dataset: {dataset_yaml}")
+    log.info("Using dataset: %s", dataset_yaml)
 
     with open(dataset_yaml) as f:
         data_cfg: dict = yaml.safe_load(f)
-    print(f"Classes: {data_cfg.get('names', 'N/A')}")
+    log.info("Classes: %s", data_cfg.get("names", "N/A"))
 
     model: YOLO = YOLO(cfg.model_name)
-    print(f"Loaded model: {cfg.model_name}")
+    log.info("Loaded model: %s", cfg.model_name)
 
     device: str = cfg.device
     batch: int = cfg.batch
     if device == "cpu" or not torch.cuda.is_available():
         device = "cpu"
         if batch > 8:
-            print("CPU detected, reducing batch size to 8")
+            log.warning("CPU detected, reducing batch size to 8")
             batch = min(batch, 8)
 
-    print(f"\n{'='*60}")
-    print(f"Training Configuration:")
-    print(f"  Model: {cfg.model_name}")
-    print(f"  Device: {device}")
-    print(f"  Image Size: {cfg.imgsz}")
-    print(f"  Batch Size: {batch}")
-    print(f"  Epochs: {cfg.epochs}")
-    print(f"  Optimizer: {cfg.optimizer}")
-    print(f"  Learning Rate: {cfg.lr0}")
-    print(f"  Dataset: {dataset_yaml}")
-    print(f"{'='*60}\n")
+    log.info("Training config: model=%s device=%s imgsz=%d batch=%d epochs=%d lr=%.4f",
+             cfg.model_name, device, cfg.imgsz, batch, cfg.epochs, cfg.lr0)
 
     results = model.train(
         data=str(dataset_yaml),
@@ -270,9 +265,9 @@ def train_model(cfg: TrainingConfig) -> object:
         import shutil
         final_path: Path = MODELS_DIR / "car_detection_best.pt"
         shutil.copy(best_model_path, final_path)
-        print(f"\nBest model saved to: {final_path}")
+        log.info("Best model saved to: %s", final_path)
 
-    print("\nTraining complete!")
+    log.info("Training complete!")
     return results
 
 
@@ -295,7 +290,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.full_data:
-        print("Preparing full COCO dataset (train2017 + val2017)...")
+        log.info("Preparing full COCO dataset (train2017 + val2017)...")
         import prepare_data
         yaml_path = prepare_data.prepare_coco_full()
         args.data = str(Path(args.data) if args.data else yaml_path)
