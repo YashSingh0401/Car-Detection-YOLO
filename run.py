@@ -71,10 +71,7 @@ def main() -> None:
         run_script("evaluate.py")
 
     elif command == "app":
-        streamlit: str = str(ROOT / "venv" / "Scripts" / "streamlit")
-        if not Path(streamlit).exists():
-            streamlit = "streamlit"
-        subprocess.run([streamlit, "run", str(ROOT / "streamlitapp.py")])
+        subprocess.run([sys.executable, "-m", "streamlit", "run", str(ROOT / "streamlitapp.py")])
 
     elif command == "all":
         run_script("prepare_data.py")

@@ -27,7 +27,8 @@ st.markdown("""
 
 st.markdown('<div class="main-title">🚗 YOLO Car Detection</div>', unsafe_allow_html=True)
 
-device: str = "cuda" if cv2.cuda.getCudaEnabledDeviceCount() > 0 else "cpu"
+import torch
+device: str = "cuda" if torch.cuda.is_available() else "cpu"
 fp16: bool = device == "cuda"
 if fp16:
     log.info("GPU detected — FP16 inference enabled")
@@ -52,12 +53,13 @@ def apply_clahe(img: np.ndarray) -> np.ndarray:
     return img
 
 
+@st.cache_resource
 def load_model(model_name: str) -> YOLO:
     log.info(f"Loading model: {model_name}")
-    m: YOLO = YOLO(model_name)
-    if fp16:
-        m.model.half()
-        log.info("Model converted to FP16")
+    model_path = Path(__file__).parent / "models" / model_name
+    if not model_path.exists():
+        model_path = Path(model_name)
+    m: YOLO = YOLO(str(model_path))
     return m
 
 
@@ -73,28 +75,23 @@ def run_detection(
     if use_tracking:
         results = model.track(proc, conf=conf, iou=iou, classes=class_ids,
                               device=device, imgsz=imgsz, augment=use_tta,
-                              persist=True, tracker="bytetrack.yaml")
+                              persist=True, tracker="bytetrack.yaml", half=fp16)
     else:
         results = model(proc, conf=conf, iou=iou, classes=class_ids,
-                        device=device, imgsz=imgsz, augment=use_tta)
+                        device=device, imgsz=imgsz, augment=use_tta, half=fp16)
 
     boxes_data: list[tuple] = []
     for r in results:
         if r.boxes is None or len(r.boxes) == 0:
             continue
-        for box, score, cls_id in zip(
+        track_ids = r.boxes.id.cpu().numpy().astype(int) if (use_tracking and r.boxes.id is not None) else None
+        for idx, (box, score, cls_id) in enumerate(zip(
             r.boxes.xyxy.cpu().numpy(),
             r.boxes.conf.cpu().numpy(),
             r.boxes.cls.cpu().numpy().astype(int),
-        ):
-            if int(cls_id) in CAR_CLASS_IDS:
-                score = min(score * 1.3, 1.0)
+        )):
             if score >= conf:
-                track_id: int = -1
-                if use_tracking and r.boxes.id is not None:
-                    tid = r.boxes.id.cpu().numpy()
-                    if len(tid) > len(boxes_data):
-                        track_id = int(tid[len(boxes_data)])
+                track_id: int = track_ids[idx] if track_ids is not None else -1
                 boxes_data.append((*box, score, cls_id, track_id))
 
     return boxes_data
@@ -178,25 +175,55 @@ def process_video_frames(
     return fcount, total_obj
 
 
+if "webcam_running" not in st.session_state:
+    st.session_state.webcam_running = False
+
+available_models: list[str] = [
+    "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt",
+    "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
+]
+custom_models_dir: Path = Path(__file__).parent / "models"
+if custom_models_dir.exists():
+    custom_pts = sorted([p.name for p in custom_models_dir.glob("*.pt")])
+    for pt in reversed(custom_pts):
+        if pt not in available_models:
+            available_models.insert(0, pt)
+
 with st.sidebar:
     st.header("⚙️ Settings")
     st.info(f"Device: **{'GPU ⚡' if device == 'cuda' else 'CPU 💻'}**")
 
     source: str = st.selectbox("Input Type", ["Image", "Video", "Webcam"])
 
-    model_name: str = st.selectbox("Model", [
-        "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt",
-        "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
-    ], index=0)
+    # Determine default model index (prefer custom model, then large yolo11x, then fallback to index 0)
+    default_idx = 0
+    if "car_detection_best.pt" in available_models:
+        default_idx = available_models.index("car_detection_best.pt")
+    elif "yolo11x.pt" in available_models:
+        default_idx = available_models.index("yolo11x.pt")
+
+    model_name: str = st.selectbox("Model", available_models, index=default_idx)
+
+    model: Optional[YOLO] = None
+    with st.spinner(f"Loading {model_name}..."):
+        try:
+            model = load_model(model_name)
+            st.sidebar.success(f"{model_name} loaded")
+        except Exception as e:
+            st.sidebar.error(f"Failed to load model: {e}")
+            st.stop()
 
     sensitivity: str = st.select_slider("Detection Sensitivity",
-        options=["Max Cars", "High", "Balanced", "Precise"], value="High")
+        options=["Max Cars", "High", "Balanced", "Precise"], value="Max Cars")
 
     imgsz: int = st.select_slider("Resolution", options=[320, 480, 640, 800, 960, 1280], value=640)
 
-    classes: list[str] = st.multiselect("Classes",
-        ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
-        default=["car", "bus", "truck", "motorcycle", "person"])
+    model_classes = list(model.names.values())
+    default_classes = [c for c in ["car", "bus", "truck", "motorcycle", "person"] if c in model_classes]
+    if not default_classes and model_classes:
+        default_classes = [model_classes[0]]
+
+    classes: list[str] = st.multiselect("Classes", options=model_classes, default=default_classes)
 
     use_tta: bool = st.checkbox("TTA (Test-Time Augmentation)", value=True)
     use_preprocessing: bool = st.checkbox("CLAHE Preprocessing", value=True)
@@ -209,7 +236,16 @@ with st.sidebar:
     if source in ("Image", "Video"):
         types: list[str] = ["jpg", "jpeg", "png", "mp4", "avi", "mov"] if source == "Video" else ["jpg", "jpeg", "png"]
         uploaded_files = st.file_uploader("Upload File(s)", type=types, accept_multiple_files=(source == "Image"))
-    start: bool = st.button("🚀 Start Detection")
+
+    start: bool = False
+    if source == "Webcam":
+        col1, col2 = st.columns(2)
+        if col1.button("🟢 Start Webcam"):
+            st.session_state.webcam_running = True
+        if col2.button("⏹ Stop Webcam"):
+            st.session_state.webcam_running = False
+    else:
+        start = st.button("🚀 Start Detection")
 
 SENS_MAP: dict[str, tuple[float, float]] = {
     "Max Cars": (0.08, 0.50), "High": (0.15, 0.45),
@@ -219,19 +255,7 @@ conf: float
 iou: float
 conf, iou = SENS_MAP[sensitivity]
 
-model: Optional[YOLO] = None
-with st.spinner(f"Loading {model_name}..."):
-    try:
-        model = load_model(model_name)
-        st.sidebar.success(f"{model_name} loaded | conf={conf}")
-    except Exception as e:
-        st.sidebar.error(f"Failed to load model: {e}")
-        st.stop()
-
-class_map: dict[str, int] = {
-    "person": 0, "bicycle": 1, "car": 2, "motorcycle": 3,
-    "bus": 5, "truck": 7, "traffic light": 9, "stop sign": 11,
-}
+class_map: dict[str, int] = {v: k for k, v in model.names.items()}
 class_ids: Optional[list[int]] = [class_map[c] for c in classes if c in class_map] if classes else None
 
 # ---- Image Detection ----
@@ -283,7 +307,7 @@ if start and source == "Image" and uploaded_files:
 
 # ---- Video Detection ----
 elif start and source == "Video" and uploaded_files:
-    uploaded_file = uploaded_files[0]
+    uploaded_file = uploaded_files
     tfile: tempfile.NamedTemporaryFile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(uploaded_file.read())
     tfile.close()
@@ -329,8 +353,8 @@ elif start and source == "Video" and uploaded_files:
             with st.expander("🎬 Processed Video", expanded=True):
                 with open(h264_tfile.name, "rb") as f:
                     st.video(f.read())
-        except subprocess.CalledProcessError:
-            st.warning("⚠️ ffmpeg not found. Install ffmpeg for browser-compatible video.")
+        except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
+            st.warning(f"⚠️ FFmpeg post-processing failed or FFmpeg is not installed ({e}). Displaying raw video...")
             with st.expander("📥 Raw Video (Download)", expanded=True):
                 with open(out_tfile.name, "rb") as f:
                     st.video(f.read())
@@ -346,17 +370,14 @@ elif start and source == "Video" and uploaded_files:
         st.code(traceback.format_exc())
 
 # ---- Webcam Detection ----
-elif start and source == "Webcam":
+elif source == "Webcam" and st.session_state.webcam_running:
     st.warning("Webcam mode: point your camera at vehicles")
-    run_webcam: bool = st.checkbox("🟢 Start Webcam", value=False)
     FRAME_WINDOW: object = st.image([])
     cap: cv2.VideoCapture = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    stop_button: object = st.button("⏹ Stop")
-
-    while run_webcam and not stop_button:
+    while st.session_state.webcam_running:
         ret: bool
         frame: np.ndarray
         ret, frame = cap.read()

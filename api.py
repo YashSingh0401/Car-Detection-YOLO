@@ -8,25 +8,26 @@ from fastapi.responses import JSONResponse, Response
 from ultralytics import YOLO
 import io
 
-app: FastAPI = FastAPI(title="Car Detection API", version="1.0.0")
-model: Optional[YOLO] = None
+from contextlib import asynccontextmanager
 
-CLASS_NAMES: dict[int, str] = {
-    0: "person", 1: "bicycle", 2: "car", 3: "motorcycle",
-    5: "bus", 7: "truck", 9: "traffic light", 11: "stop sign",
-}
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_model()
+    yield
+
+app: FastAPI = FastAPI(title="Car Detection API", version="1.0.0", lifespan=lifespan)
+model: Optional[YOLO] = None
 
 
 def get_model() -> YOLO:
     global model
     if model is None:
-        model = YOLO("yolo11m.pt")
+        custom_best = Path(__file__).parent / "models" / "car_detection_best.pt"
+        if custom_best.exists():
+            model = YOLO(str(custom_best))
+        else:
+            model = YOLO("yolo11m.pt")
     return model
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    get_model()
 
 
 @app.get("/")
@@ -62,7 +63,7 @@ async def detect(
                 "bbox": [float(x) for x in box],
                 "confidence": float(score),
                 "class_id": int(cls_id),
-                "class_name": CLASS_NAMES.get(int(cls_id), "unknown"),
+                "class_name": m.names.get(int(cls_id), "unknown"),
             })
 
     return JSONResponse({

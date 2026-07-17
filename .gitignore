@@ -18,6 +18,7 @@ runs/
 
 # Project-specific output & temp directories
 output/
+data/
 .ipynb_checkpoints/
 
 # Ignore large media

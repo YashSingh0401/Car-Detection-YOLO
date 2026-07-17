@@ -49,19 +49,39 @@ def benchmark_models() -> pd.DataFrame:
 
 
 def evaluate_custom_model(model_path: str, dataset_yaml: Optional[Path] = None) -> Optional[object]:
+    import yaml
+    import os
+
     if dataset_yaml is None:
         dataset_yaml = ROOT / "data" / "car_dataset" / "dataset.yaml"
 
-    if not Path(model_path).exists():
-        print(f"Model not found: {model_path}")
+    is_local = Path(model_path).exists()
+    
+    try:
+        model: YOLO = YOLO(str(model_path))
+    except Exception as e:
+        print(f"Error loading model {model_path}: {e}")
         return None
 
-    model: YOLO = YOLO(str(model_path))
+    val_dataset = "coco8.yaml"
+    if dataset_yaml.exists() and is_local:
+        try:
+            with open(dataset_yaml) as f:
+                data_cfg = yaml.safe_load(f)
+            if len(model.names) == data_cfg.get("nc", 80):
+                val_dataset = str(dataset_yaml)
+            else:
+                print(f"Class count mismatch (Model: {len(model.names)}, Dataset: {data_cfg.get('nc')}). Evaluating {model_path} on coco8.yaml instead.")
+        except Exception as e:
+            print(f"Error parsing dataset YAML: {e}. Defaulting to coco8.yaml")
+    else:
+        if not is_local:
+            print(f"{model_path} is a pretrained model. Evaluating on coco8.yaml.")
 
-    print(f"\nEvaluating {model_path}...")
+    print(f"\nEvaluating {model_path} on {val_dataset}...")
 
     metrics = model.val(
-        data=str(dataset_yaml) if dataset_yaml.exists() else "coco8.yaml",
+        data=val_dataset,
         device="cpu",
         imgsz=640,
     )

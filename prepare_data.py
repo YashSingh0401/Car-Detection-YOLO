@@ -1,4 +1,4 @@
-﻿"""Download COCO vehicle subset and prepare for YOLO training."""
+"""Download COCO vehicle subset and prepare for YOLO training."""
 import os
 import logging
 import yaml
@@ -16,13 +16,13 @@ DATA_DIR: Path = Path("data")
 DATASET_DIR: Path = DATA_DIR / "car_dataset"
 
 VEHICLE_CLASSES: dict[int, str] = {
-    2: "car",
-    3: "motorcycle",
-    5: "bus",
-    7: "truck",
+    3: "car",
+    4: "motorcycle",
+    6: "bus",
+    8: "truck",
 }
 CLASS_NAMES: list[str] = ["car", "motorcycle", "bus", "truck"]
-CLASS_MAP: dict[int, int] = {2: 0, 3: 1, 5: 2, 7: 3}
+CLASS_MAP: dict[int, int] = {3: 0, 4: 1, 6: 2, 8: 3}
 
 # Use COCO train2017 for training (118k images) and val2017 for validation
 COCO_TRAIN_URL: str = "http://images.cocodataset.org/zips/train2017.zip"
@@ -102,7 +102,10 @@ def _filter_coco_annotations(ann_file: Path, coco_dir: Path, img_dir: Path, use_
     from pycocotools.coco import COCO
     coco: COCO = COCO(str(ann_file))
     cat_ids: list[int] = coco.getCatIds(catNms=list(VEHICLE_CLASSES.values()))
-    all_img_ids: list[int] = coco.getImgIds(catIds=cat_ids)
+    all_img_ids_set = set()
+    for cat_id in cat_ids:
+        all_img_ids_set.update(coco.getImgIds(catIds=[cat_id]))
+    all_img_ids: list[int] = sorted(list(all_img_ids_set))
     print(f"Found {len(all_img_ids)} images containing vehicles")
 
     split: str = "val" if use_as_val else "train"
@@ -167,7 +170,10 @@ def prepare_coco_val_subset() -> Path:
 
     coco: COCO = COCO(str(ann_file))
     cat_ids: list[int] = coco.getCatIds(catNms=list(VEHICLE_CLASSES.values()))
-    all_img_ids: list[int] = coco.getImgIds(catIds=cat_ids)
+    all_img_ids_set = set()
+    for cat_id in cat_ids:
+        all_img_ids_set.update(coco.getImgIds(catIds=[cat_id]))
+    all_img_ids: list[int] = sorted(list(all_img_ids_set))
     log.info("Found %d images containing vehicles", len(all_img_ids))
 
     for split in ["train", "val"]:
